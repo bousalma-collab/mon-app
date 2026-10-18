@@ -1,0 +1,8 @@
+# Dépendances de CashFlow AI (Python 3.9+)
+# Installation : pip install -r requirements.txt
+streamlit>=1.32
+pandas>=2.0
+plotly>=5.18
+openpyxl>=3.1
+reportlab>=4.0
+pytest>=7.4

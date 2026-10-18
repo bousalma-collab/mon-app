@@ -1,0 +1,50 @@
+# Environnements virtuels
+.venv/
+venv/
+env/
+ENV/
+.venv*/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+build/
+dist/
+
+# Base de données locale (ne jamais versionner de données réelles)
+data/*.db
+data/*.db-wal
+data/*.db-shm
+*.sqlite
+*.sqlite3
+*.db
+
+# Secrets et configuration personnelle
+.env
+.env.*
+.streamlit/secrets.toml
+secrets.toml
+
+# Fichiers temporaires et exports
+*.log
+*.tmp
+*.bak
+~$*
+exports/
+rapport_*.pdf
+rapport_*.xlsx
+transactions_*.csv
+factures_*.csv
+prevision_*.csv
+paiements_*.csv
+
+# Système
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/

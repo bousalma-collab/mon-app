@@ -1,0 +1,19 @@
+# Configuration de l'interface CashFlow AI
+# Palette fintech : navy, vert, ambre, fond neutre clair.
+
+[theme]
+primaryColor = "#12876f"
+backgroundColor = "#f5f7fb"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#0f2038"
+font = "sans serif"
+
+[client]
+toolbarMode = "minimal"
+showErrorDetails = true
+
+[browser]
+gatherUsageStats = false
+
+[server]
+headless = true

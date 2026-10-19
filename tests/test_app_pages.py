@@ -33,6 +33,16 @@ def app_test(tmp_path, monkeypatch):
     from streamlit.testing.v1 import AppTest
 
     application = AppTest.from_file(str(RACINE / "app.py"), default_timeout=300)
+    # On court-circuite la page de connexion : ces tests verifient les pages.
+    application.session_state["utilisateur"] = {
+        "id": 1,
+        "username": "test",
+        "full_name": "Compte de test",
+        "role": "admin",
+        "is_active": True,
+        "created_at": None,
+        "last_login_at": None,
+    }
     yield application
     db.close_connection()
 
@@ -69,3 +79,35 @@ def test_application_avec_donnees_de_demonstration(app_test):
     texte = " ".join(bloc.value for bloc in app_test.markdown)
     assert "Trésorerie actuelle" in texte
     assert "Mode démonstration actif" in texte
+
+
+def test_page_de_connexion_affichee_sans_utilisateur(app_test):
+    app_test.session_state["utilisateur"] = None
+    app_test.run()
+    assert not app_test.exception, [str(e) for e in app_test.exception]
+
+    texte = " ".join(bloc.value for bloc in app_test.markdown)
+    assert "Connexion" in texte
+    assert len(app_test.text_input) >= 2
+    # La navigation reste inaccessible tant que l'on n'est pas connecte.
+    assert len(app_test.sidebar.radio) == 0
+
+
+def test_connexion_refusee_puis_acceptee(app_test):
+    app_test.session_state["utilisateur"] = None
+    app_test.run()
+
+    # Mauvais code : la session reste fermee et un message s'affiche.
+    app_test.text_input[0].set_value("admin")
+    app_test.text_input[1].set_value("mauvais-code")
+    app_test.button[0].click().run()
+    assert not app_test.exception
+    assert not app_test.session_state["utilisateur"]
+    assert any("incorrect" in str(erreur.value) for erreur in app_test.error)
+
+    # Bon code : la session s'ouvre et la navigation apparait.
+    app_test.text_input[0].set_value("admin")
+    app_test.text_input[1].set_value("cashflow2026")
+    app_test.button[0].click().run()
+    assert not app_test.exception
+    assert app_test.session_state["utilisateur"]["username"] == "admin"

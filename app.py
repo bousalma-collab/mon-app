@@ -19,6 +19,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+import auth  # noqa: E402
+import connexion  # noqa: E402
 import db  # noqa: E402
 import demo_data  # noqa: E402
 import finance  # noqa: E402
@@ -56,6 +58,7 @@ def _initialiser() -> object:
 def _sidebar(ctx: dict) -> str:
     settings = ctx["settings"]
     devise = settings.get("currency") or "MAD"
+    utilisateur = st.session_state.get("utilisateur") or {}
 
     with st.sidebar:
         st.markdown('<div class="cf-brand">CashFlow AI</div>', unsafe_allow_html=True)
@@ -75,6 +78,15 @@ def _sidebar(ctx: dict) -> str:
                 "Mode démonstration actif — données fictives</div>",
                 unsafe_allow_html=True,
             )
+
+        st.markdown(
+            '<div class="cf-who">Connecté : '
+            f'<strong>{utilisateur.get("full_name") or utilisateur.get("username") or "—"}</strong>'
+            '<br><span style="font-size:.74rem">'
+            f'{auth.libelle_role(utilisateur.get("role", "lecteur"))}'
+            f' · {utilisateur.get("username", "")}</span></div>',
+            unsafe_allow_html=True,
+        )
 
         page = st.radio("Navigation", list(PAGES.keys()), key="nav", label_visibility="collapsed")
 
@@ -124,6 +136,9 @@ def _sidebar(ctx: dict) -> str:
             "Aucune connexion bancaire ni API externe.</div>",
             unsafe_allow_html=True,
         )
+
+        if st.button("Se déconnecter", key="bouton_deconnexion"):
+            connexion.deconnexion()
     return page
 
 
@@ -132,6 +147,14 @@ def main() -> None:
     theme.apply_plotly_theme()
 
     conn = _initialiser()
+
+    # Verrou d'acces : sans utilisateur authentifie, on n'affiche que la connexion.
+    if not st.session_state.get("utilisateur"):
+        theme.masquer_sidebar()
+        connexion.render_login(conn)
+        theme.footer()
+        return
+
     settings = db.get_settings(conn)
     today = date.today()
     transactions = db.list_transactions(conn)

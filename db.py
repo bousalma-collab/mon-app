@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 
 import finance
+import auth
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "data" / "cashflow_ai.db"
@@ -84,6 +85,18 @@ CREATE TABLE IF NOT EXISTS payments (
     UNIQUE (invoice_id, payment_date, amount)
 );
 
+CREATE TABLE IF NOT EXISTS users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT    NOT NULL UNIQUE,
+    full_name     TEXT    NOT NULL DEFAULT '',
+    role          TEXT    NOT NULL DEFAULT 'admin' CHECK (role IN ('admin', 'lecteur')),
+    salt          TEXT    NOT NULL,
+    code_hash     TEXT    NOT NULL,
+    is_active     INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT    NOT NULL,
+    last_login_at TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_tx_date   ON transactions (tx_date);
 CREATE INDEX IF NOT EXISTS idx_tx_status ON transactions (status);
 CREATE INDEX IF NOT EXISTS idx_inv_type  ON invoices (invoice_type);
@@ -152,6 +165,9 @@ def init_db(conn: sqlite3.Connection) -> sqlite3.Connection:
             ),
         )
     conn.commit()
+    # Les comptes par defaut ne sont crees qu'une fois, sur une base vierge :
+    # ils garantissent un acces a l'application au premier lancement.
+    ensure_default_users(conn)
     return conn
 
 
@@ -876,3 +892,180 @@ def database_stats(conn: sqlite3.Connection) -> dict:
         "payments": int(nb_paiements),
         "path": str(DB_PATH),
     }
+
+
+# ---------------------------------------------------------------------------
+# Utilisateurs et authentification
+# ---------------------------------------------------------------------------
+# Sel et empreinte factices : servent a effectuer un calcul de hachage meme
+# lorsque le compte n'existe pas, afin que le temps de reponse ne revele pas
+# quels noms d'utilisateur existent.
+_SEL_FACTICE = "00" * auth.LONGUEUR_SEL
+_EMPREINTE_FACTICE = auth.hacher_code("code-inexistant", _SEL_FACTICE)
+
+
+def _user_from_row(row: sqlite3.Row) -> dict:
+    return {
+        "id": int(row["id"]),
+        "username": row["username"],
+        "full_name": row["full_name"] or "",
+        "role": row["role"],
+        "is_active": bool(row["is_active"]),
+        "created_at": parse_date(str(row["created_at"] or "")[:10]),
+        "last_login_at": parse_date(str(row["last_login_at"] or "")[:10]),
+    }
+
+
+def _nom_affiche(user: dict) -> str:
+    return user.get("full_name") or user.get("username") or ""
+
+
+def ensure_default_users(conn: sqlite3.Connection) -> int:
+    """Cree les comptes par defaut uniquement si aucun utilisateur n'existe."""
+    nb = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
+    if nb:
+        return 0
+    crees = 0
+    with conn:
+        for modele in auth.UTILISATEURS_DEFAUT:
+            _inserer_utilisateur(
+                conn,
+                modele["username"],
+                modele["code"],
+                modele["full_name"],
+                modele["role"],
+            )
+            crees += 1
+    return crees
+
+
+def _inserer_utilisateur(
+    conn: sqlite3.Connection, username: str, code: str, full_name: str, role: str
+) -> int:
+    nom = auth.normaliser_username(username)
+    code_valide = auth.valider_code(code)
+    role_valide = auth.valider_role(role)
+    sel = auth.generer_sel()
+    curseur = conn.execute(
+        """INSERT INTO users
+           (username, full_name, role, salt, code_hash, is_active, created_at)
+           VALUES (?, ?, ?, ?, ?, 1, ?)""",
+        (
+            nom,
+            (full_name or "").strip()[:80],
+            role_valide,
+            sel,
+            auth.hacher_code(code_valide, sel),
+            _now(),
+        ),
+    )
+    return int(curseur.lastrowid)
+
+
+def get_user(conn: sqlite3.Connection, username: str) -> Optional[dict]:
+    try:
+        nom = auth.normaliser_username(username)
+    except ValueError:
+        return None
+    ligne = conn.execute("SELECT * FROM users WHERE username = ?", (nom,)).fetchone()
+    return _user_from_row(ligne) if ligne else None
+
+
+def authenticate(conn: sqlite3.Connection, username: str, code: str) -> Optional[dict]:
+    """Renvoie l'utilisateur si le couple nom/code est valide, sinon None."""
+    try:
+        nom = auth.normaliser_username(username)
+    except ValueError:
+        nom = None
+
+    if nom is None:
+        auth.verifier_code(code or "", _SEL_FACTICE, _EMPREINTE_FACTICE)
+        return None
+
+    ligne = conn.execute("SELECT * FROM users WHERE username = ?", (nom,)).fetchone()
+    if ligne is None:
+        auth.verifier_code(code or "", _SEL_FACTICE, _EMPREINTE_FACTICE)
+        return None
+
+    if not auth.verifier_code(code or "", ligne["salt"], ligne["code_hash"]):
+        return None
+    if not ligne["is_active"]:
+        return None
+
+    with conn:
+        conn.execute(
+            "UPDATE users SET last_login_at = ? WHERE id = ?", (_now(), ligne["id"])
+        )
+    utilisateur = _user_from_row(ligne)
+    utilisateur["last_login_at"] = date.today()
+    return utilisateur
+
+
+def list_users(conn: sqlite3.Connection) -> list[dict]:
+    lignes = conn.execute(
+        "SELECT * FROM users ORDER BY is_active DESC, role, username"
+    ).fetchall()
+    return [_user_from_row(ligne) for ligne in lignes]
+
+
+def create_user(
+    conn: sqlite3.Connection,
+    username: str,
+    code: str,
+    full_name: str = "",
+    role: str = "lecteur",
+) -> int:
+    """Cree un compte ; leve ValueError si le nom est deja pris."""
+    nom = auth.normaliser_username(username)
+    existe = conn.execute(
+        "SELECT 1 FROM users WHERE username = ?", (nom,)
+    ).fetchone()
+    if existe:
+        raise ValueError(f"Le nom d'utilisateur « {nom} » est déjà utilisé.")
+    with conn:
+        return _inserer_utilisateur(conn, nom, code, full_name, role)
+
+
+def update_user_code(conn: sqlite3.Connection, user_id: int, code: str) -> None:
+    """Change le code d'acces d'un compte (nouveau sel a chaque changement)."""
+    ligne = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
+    if ligne is None:
+        raise ValueError("Utilisateur introuvable.")
+    code_valide = auth.valider_code(code)
+    sel = auth.generer_sel()
+    with conn:
+        conn.execute(
+            "UPDATE users SET salt = ?, code_hash = ? WHERE id = ?",
+            (sel, auth.hacher_code(code_valide, sel), user_id),
+        )
+
+
+def _administrateurs_actifs(conn: sqlite3.Connection) -> int:
+    return int(
+        conn.execute(
+            "SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND is_active = 1"
+        ).fetchone()["n"]
+    )
+
+
+def set_user_active(conn: sqlite3.Connection, user_id: int, actif: bool) -> None:
+    ligne = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if ligne is None:
+        raise ValueError("Utilisateur introuvable.")
+    if not actif and ligne["role"] == "admin" and ligne["is_active"]:
+        if _administrateurs_actifs(conn) <= 1:
+            raise ValueError("Impossible de désactiver le dernier administrateur actif.")
+    with conn:
+        conn.execute(
+            "UPDATE users SET is_active = ? WHERE id = ?", (1 if actif else 0, user_id)
+        )
+
+
+def delete_user(conn: sqlite3.Connection, user_id: int) -> None:
+    ligne = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if ligne is None:
+        raise ValueError("Utilisateur introuvable.")
+    if ligne["role"] == "admin" and ligne["is_active"] and _administrateurs_actifs(conn) <= 1:
+        raise ValueError("Impossible de supprimer le dernier administrateur actif.")
+    with conn:
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))

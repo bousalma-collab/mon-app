@@ -223,6 +223,50 @@ CSS = f"""
     div[data-testid="stMetricValue"] {{ font-size: 1.3rem; }}
     .stTabs [data-baseweb="tab"] {{ font-weight: 600; }}
     [data-testid="stDataFrame"] {{ border: 1px solid {CARD_BORDER}; border-radius: 10px; }}
+    /* ------- Page de connexion ------- */
+    .cf-login-hero {{
+        background: linear-gradient(160deg, {NAVY} 0%, {NAVY_LIGHT} 100%);
+        border-radius: 16px;
+        padding: 34px 28px;
+        text-align: center;
+        margin-bottom: 20px;
+        box-shadow: 0 10px 30px rgba(15, 32, 56, .18);
+    }}
+    .cf-login-logo {{
+        color: #ffffff;
+        font-size: 1.9rem;
+        font-weight: 800;
+        letter-spacing: .3px;
+    }}
+    .cf-login-tag {{
+        color: #9db9d8;
+        font-size: .9rem;
+        margin-top: 6px;
+        line-height: 1.4;
+    }}
+    .cf-login-title {{
+        font-size: 1.08rem;
+        font-weight: 650;
+        color: {NAVY};
+        margin: 2px 0 10px 0;
+    }}
+    .cf-login-help {{
+        text-align: center;
+        color: {GREY};
+        font-size: .78rem;
+        margin-top: 14px;
+        line-height: 1.5;
+    }}
+    .cf-who {{
+        background: rgba(255,255,255,.06);
+        border: 1px solid rgba(255,255,255,.12);
+        border-radius: 10px;
+        padding: 9px 12px;
+        margin: 6px 0 2px 0;
+        font-size: .8rem;
+        color: #dfe9f5;
+    }}
+    .cf-who strong {{ color: #ffffff; }}
     /* ------- Adaptation aux ecrans etroits ------- */
     @media (max-width: 1350px) {{
         .cf-kpi-value {{ font-size: 1.16rem; }}
@@ -292,6 +336,18 @@ def download_button(label: str, donnees, fichier: str, mime: str, key: str) -> N
         st.download_button(
             label, donnees, file_name=fichier, mime=mime, key=key, use_container_width=True
         )
+
+
+def masquer_sidebar() -> None:
+    """Masque completement la barre laterale tant que l'utilisateur n'est pas connecte."""
+    st.markdown(
+        "<style>"
+        "[data-testid='stSidebar'], [data-testid='stSidebarCollapsedControl'], "
+        "[data-testid='collapsedControl'] {display: none !important;}"
+        ".block-container {padding-top: 4.5rem; max-width: 940px;}"
+        "</style>",
+        unsafe_allow_html=True,
+    )
 
 
 def page_title(titre: str, sous_titre: str = "") -> None:

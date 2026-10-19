@@ -19,6 +19,8 @@ français**, devise **MAD**.
 
 | Fichier | Rôle | Règle |
 |---|---|---|
+| `auth.py` | Hachage des codes, validation des identifiants | **Pur** : n'importe ni `db` ni Streamlit ; aucun code en clair |
+| `connexion.py` | Écran de connexion / déconnexion | Ne fait aucun calcul financier |
 | `finance.py` | Moteur de calcul **pur** | Ne doit JAMAIS importer `db`, ni Streamlit |
 | `db.py` | Persistance SQLite | Requêtes **paramétrées** uniquement (`?`) |
 | `io_utils.py` | Import/export, DataFrames | Aucun calcul métier |
@@ -26,7 +28,7 @@ français**, devise **MAD**.
 | `demo_data.py` | Jeu fictif | Dates toujours **relatives à aujourd'hui** |
 | `theme.py` | CSS, cartes KPI, alertes | Ne contient aucun calcul financier |
 | `views/*.py` | Une page = un `render(ctx)` | Lecture via `db`, calculs via `finance` |
-| `app.py` | Entrée + navigation + contexte | Le `ctx` est construit une fois par exécution |
+| `app.py` | Entrée + connexion + navigation + contexte | Le `ctx` est construit **après** authentification |
 
 ## Invariants financiers à ne jamais casser
 
@@ -40,6 +42,8 @@ français**, devise **MAD**.
    (`transactions.invoice_id`) est exclue de la prévision.
 7. Montants en `Decimal` (`finance.to_decimal`, `finance.money`), jamais en flottants nus.
 8. Toute simulation travaille sur des **copies** : aucune écriture en base.
+9. Aucun code d'accès en clair : uniquement un sel + une empreinte PBKDF2
+   (`auth.hacher_code`). Ne jamais journaliser un code saisi.
 
 ## Conventions techniques
 
@@ -56,12 +60,13 @@ français**, devise **MAD**.
 ## Vérifications avant de livrer
 
 ```powershell
-python -m py_compile app.py db.py finance.py theme.py io_utils.py assistant.py demo_data.py views\*.py
+python -m py_compile app.py db.py finance.py theme.py io_utils.py assistant.py demo_data.py auth.py connexion.py views\*.py
 python -m pytest tests -q
 ```
 
 Le test `tests/test_app_pages.py` exécute réellement `app.py` (base temporaire) : il doit
-passer pour les 7 pages, base vide puis base de démonstration.
+passer pour l'écran de connexion (accès bloqué, code refusé, code accepté) puis pour les
+7 pages, base vide puis base de démonstration.
 
 ## Pièges déjà rencontrés
 

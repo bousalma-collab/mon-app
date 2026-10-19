@@ -18,6 +18,7 @@ simule trois scénarios de crise et répond à des questions financières en fra
 
 | Page | Contenu |
 |---|---|
+| **Connexion** | Écran d'accès par nom d'utilisateur et code personnel ; blocage temporaire après 5 échecs ; déconnexion depuis la barre latérale |
 | **Tableau de bord** | 7 indicateurs clés, alertes de risque réelles, 3 graphiques (trésorerie historique, encaissements/décaissements mensuels, trésorerie projetée), dernières opérations, factures en retard |
 | **Trésorerie** | Création, modification, suppression (avec confirmation), recherche et filtres, import CSV/Excel, export CSV/Excel |
 | **Factures** | Factures clients et fournisseurs, paiements partiels et totaux, statuts (Ouverte, Partiellement payée, En retard, Payée), suppression sécurisée |
@@ -43,6 +44,27 @@ simule trois scénarios de crise et répond à des questions financières en fra
   (7 jours par défaut) ; les dettes fournisseurs échues sont supposées payables
   immédiatement (hypothèse prudente).
 * Montants calculés en `Decimal` : pas d'erreur d'arrondi.
+
+### Connexion
+
+L'application s'ouvre sur un écran de connexion : sans nom d'utilisateur et code
+valides, aucune page ni aucune donnée n'est accessible. Deux comptes sont créés
+automatiquement au premier lancement :
+
+| Identifiant | Code d'accès | Rôle |
+|---|---|---|
+| `admin` | `cashflow2026` | Administrateur — peut gérer les comptes |
+| `demo` | `demo2026` | Consultation — accès en lecture |
+
+* Les codes ne sont **jamais stockés en clair** : seule une empreinte
+  PBKDF2-HMAC-SHA256 (200 000 itérations, sel aléatoire par compte) est conservée.
+* Après **5 tentatives échouées**, la connexion est bloquée pendant 60 secondes.
+* La page « Rapports et paramètres » permet de changer son code, de créer des
+  comptes, de les désactiver, de réinitialiser un code ou de les supprimer.
+* Le dernier administrateur actif ne peut être ni supprimé ni désactivé.
+
+> **Changez les codes par défaut dès la première utilisation**
+> (« Rapports et paramètres » → « Mon compte »).
 
 ---
 
@@ -112,16 +134,22 @@ Le dossier `tests/` contient :
   détection des retards, prévision journalière, alertes, simulations, refus de
   surpaiement, refus de doublon, absence de double comptage, jeu de démonstration,
   exports…).
+* `test_auth.py` : 23 tests de l'authentification (empreintes différentes pour un même
+  code, vérification, validation des identifiants, refus d'un mauvais code, compte
+  désactivé, doublon de nom, changement de code, protection du dernier administrateur,
+  code jamais stocké en clair).
 * `test_app_pages.py` : tests d'intégration qui exécutent réellement l'application
-  Streamlit (base vide **et** base de démonstration) et vérifient que les 7 pages
-  s'affichent sans erreur.
+  Streamlit (base vide **et** base de démonstration), vérifient que l'écran de connexion
+  bloque l'accès, qu'un code refusé laisse la session fermée, qu'un code valide l'ouvre,
+  puis que les 7 pages s'affichent sans erreur.
 
 ---
 
 ## 5. Base de données
 
 * Fichier SQLite : **`data/cashflow_ai.db`** (créé automatiquement au premier lancement).
-* Tables : `settings` (paramètres), `transactions`, `invoices`, `payments`.
+* Tables : `settings` (paramètres), `transactions`, `invoices`, `payments`,
+  `users` (comptes et empreintes des codes).
 * Toutes les requêtes sont **paramétrées** (`?`) : pas d'injection SQL possible.
 * Les données restent disponibles après fermeture de l'application.
 * Pour repartir de zéro : page « Rapports et paramètres » → « Effacer les données ».
@@ -132,9 +160,11 @@ Le dossier `tests/` contient :
 ## 6. Contenu du projet
 
 ```
-app.py                  Point d'entrée Streamlit (navigation + contexte)
+app.py                  Point d'entrée Streamlit (connexion, navigation, contexte)
+connexion.py            Écran de connexion et déconnexion
+auth.py                 Hachage des codes (PBKDF2), validation des identifiants
 finance.py              Moteur de calcul financier (fonctions pures, Decimal)
-db.py                   Couche SQLite (schéma, CRUD, paiements atomiques)
+db.py                   Couche SQLite (schéma, CRUD, paiements atomiques, comptes)
 io_utils.py             Import CSV/Excel, exports CSV/Excel/PDF, DataFrames
 assistant.py            Assistant financier local (règles, français)
 demo_data.py            Générateur du jeu de démonstration
@@ -159,7 +189,10 @@ requirements.txt        Dépendances
 * **Délai de recouvrement estimé** paramétrable (7 jours par défaut) : hypothèse simple,
   pas un modèle de comportement de paiement.
 * **Devise** : MAD uniquement dans cette version (aucune conversion de devises).
-* **Pas de multi-utilisateur** : application locale mono-poste, sans authentification.
+* **Pas de multi-utilisateur simultané** : l'authentification est locale et sert à
+  restreindre l'accès sur un poste donné. Il n'y a ni rôles serveur, ni récupération de
+  code par e-mail, ni journal d'audit ; la base SQLite reste lisible par quiconque a
+  accès au fichier.
 * **PDF** : généré via `reportlab` (téléchargement depuis la page Rapports). Si la
   bibliothèque est absente, l'application le signale et les exports CSV/Excel restent
   disponibles.

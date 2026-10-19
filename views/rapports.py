@@ -7,6 +7,7 @@ from datetime import date, timedelta
 import pandas as pd
 import streamlit as st
 
+import auth
 import db
 import demo_data
 import finance
@@ -342,6 +343,141 @@ def render(ctx: dict) -> None:
         f"Base de données locale : {stats['path']} — {stats['transactions']} transaction(s), "
         f"{stats['invoices']} facture(s), {stats['payments']} paiement(s)."
     )
+
+    # ------------------------------------------------- Mon compte
+    theme.section("Mon compte")
+    utilisateur = st.session_state.get("utilisateur") or {}
+    col_infos, col_code = st.columns([1, 1.6])
+    with col_infos:
+        st.markdown(
+            f"**{utilisateur.get('full_name') or utilisateur.get('username')}**  \n"
+            f"Identifiant : `{utilisateur.get('username', '')}`  \n"
+            f"Rôle : {auth.libelle_role(utilisateur.get('role', 'lecteur'))}"
+        )
+    with col_code:
+        with st.form("form_mon_code"):
+            ancien = st.text_input(
+                "Code actuel", type="password", key="mon_code_ancien"
+            )
+            nouveau = st.text_input(
+                "Nouveau code", type="password", key="mon_code_nouveau"
+            )
+            confirme = st.text_input(
+                "Confirmer le nouveau code", type="password", key="mon_code_confirme"
+            )
+            changer_code = st.form_submit_button("Changer mon code")
+        if changer_code:
+            try:
+                if not db.authenticate(
+                    conn, utilisateur.get("username", ""), ancien
+                ):
+                    raise ValueError("Le code actuel est incorrect.")
+                if nouveau != confirme:
+                    raise ValueError(
+                        "Les deux saisies du nouveau code ne correspondent pas."
+                    )
+                db.update_user_code(conn, int(utilisateur["id"]), nouveau)
+                st.success("Votre code d'accès a été modifié.")
+            except Exception as exc:  # noqa: BLE001
+                st.error(str(exc))
+
+    # ------------------------------------------------- Utilisateurs
+    if utilisateur.get("role") == "admin":
+        theme.section("Utilisateurs")
+        st.caption(
+            "Comptes autorisés à ouvrir l'application. Les codes ne sont jamais "
+            "affichés : ils peuvent seulement être réinitialisés."
+        )
+        comptes = db.list_users(conn)
+        lignes = [
+            {
+                "Identifiant": compte["username"],
+                "Nom": compte["full_name"] or "—",
+                "Rôle": auth.libelle_role(compte["role"]),
+                "Statut": "Actif" if compte["is_active"] else "Désactivé",
+                "Dernière connexion": (
+                    finance.format_date_fr(compte["last_login_at"])
+                    if compte["last_login_at"]
+                    else "—"
+                ),
+            }
+            for compte in comptes
+        ]
+        theme.dataframe(pd.DataFrame(lignes), hide_index=True)
+
+        with st.expander("Ajouter un utilisateur"):
+            with st.form("form_ajout_utilisateur"):
+                nouveau_nom = st.text_input(
+                    "Nom d'utilisateur", key="new_user_nom", placeholder="ex. salma"
+                )
+                nouveau_libelle = st.text_input(
+                    "Nom affiché", key="new_user_libelle", placeholder="ex. Salma B."
+                )
+                nouveau_role = st.selectbox(
+                    "Rôle",
+                    ["lecteur", "admin"],
+                    format_func=auth.libelle_role,
+                    key="new_user_role",
+                )
+                nouveau_code = st.text_input(
+                    "Code d'accès", type="password", key="new_user_code"
+                )
+                nouveau_code_bis = st.text_input(
+                    "Confirmer le code", type="password", key="new_user_code_bis"
+                )
+                creer = st.form_submit_button("Créer le compte")
+            if creer:
+                try:
+                    if nouveau_code != nouveau_code_bis:
+                        raise ValueError("Les deux saisies du code ne correspondent pas.")
+                    db.create_user(
+                        conn,
+                        nouveau_nom,
+                        nouveau_code,
+                        nouveau_libelle,
+                        nouveau_role,
+                    )
+                    st.success(f"Compte « {nouveau_nom.strip().lower()} » créé.")
+                    st.rerun()
+                except Exception as exc:  # noqa: BLE001
+                    st.error(str(exc))
+
+        with st.expander("Gérer un compte"):
+            noms = [compte["username"] for compte in comptes]
+            selection = st.selectbox("Compte à gérer", noms, key="admin_compte")
+            cible = next(c for c in comptes if c["username"] == selection)
+            st.caption(
+                f"{cible['full_name'] or '—'} · {auth.libelle_role(cible['role'])} · "
+                + ("actif" if cible["is_active"] else "désactivé")
+            )
+            code_reinit = st.text_input(
+                "Nouveau code", type="password", key=f"reinit_code_{selection}"
+            )
+            col_reset, col_etat, col_suppr = st.columns(3)
+            if col_reset.button("Réinitialiser le code", key=f"btn_reinit_{selection}"):
+                try:
+                    db.update_user_code(conn, int(cible["id"]), code_reinit)
+                    st.success(f"Code de « {selection} » réinitialisé.")
+                except Exception as exc:  # noqa: BLE001
+                    st.error(str(exc))
+            libelle_etat = "Désactiver" if cible["is_active"] else "Réactiver"
+            if col_etat.button(libelle_etat, key=f"btn_etat_{selection}"):
+                try:
+                    db.set_user_active(conn, int(cible["id"]), not cible["is_active"])
+                    st.rerun()
+                except Exception as exc:  # noqa: BLE001
+                    st.error(str(exc))
+            if col_suppr.button("Supprimer", key=f"btn_suppr_{selection}"):
+                try:
+                    if int(cible["id"]) == int(utilisateur.get("id", 0)):
+                        raise ValueError(
+                            "Vous ne pouvez pas supprimer le compte avec lequel "
+                            "vous êtes connecté."
+                        )
+                    db.delete_user(conn, int(cible["id"]))
+                    st.rerun()
+                except Exception as exc:  # noqa: BLE001
+                    st.error(str(exc))
 
     # ------------------------------------------------- Données de démo
     theme.section("Données de démonstration")
